@@ -24,8 +24,12 @@ typedef struct parameters {
     int num;
 } Params;
 Params params;
+int totalPackets = 0;
 
 int parseArgs(int argc, char *argv[]);
+void processPacket(char *args, const struct pcap_pkthdr *header, const char *buffer);
+void tcpPacket(const char *buffer, int len);
+void udpPacket(const char *buffer, int len);
 
 int main(int argc, char *argv[]) {
     parseArgs(argc, argv);
@@ -86,6 +90,42 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+void processPacket(char *args, const struct pcap_pkthdr *header, const char *buffer) {
+    struct iphdr *ipHeader = (struct iphdr*) (buffer + sizeof(struct ethhdr));
+    switch (ipHeader->protocol) {
+        case 1:
+            //icmp_packet(buffer, header->len);
+            break;
+        case 6:
+            if ((params.tcp == 0 && params.udp == 0) || params.tcp == 1) {
+                tcpPacket(buffer, header->len);
+            }
+            totalPackets++;
+            break;
+        case 17:
+            if ((params.tcp == 0 && params.udp == 0) || params.udp == 1) {
+                udpPacket(buffer, header->len);
+            }
+            totalPackets++;
+            break;
+        default:
+            break;
+    }
+}
+
+void tcpPacket(const char *buffer, int len) {
+    unsigned int ipHeaderLen;
+    struct iphdr *ipHeader = (struct iphdr*) (buffer + sizeof(struct ethhdr));
+    ipHeaderLen = ipHeader->ihl*4;
+
+    struct tcphdr *tcpHeader = (struct tcphdr*) (buffer + sizeof(struct ethhdr) + ipHeaderLen);
+
+    int headerLen = sizeof(struct ethhdr) + ipHeaderLen + tcpHeader->doff*4;
+}
+
+void udpPacket(const char *buffer, int len) {
+
+}
 
 int parseArgs(int argc, char *argv[]) {
     params.interface = 0;
