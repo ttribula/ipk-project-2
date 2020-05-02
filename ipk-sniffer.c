@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "string.h"
 #include "netdb.h"
 #include "netinet/ip.h"
@@ -8,7 +9,6 @@
 #include "sys/socket.h"
 #include "arpa/inet.h"
 #include "pcap.h"
-#include <stdlib.h>
 #include <time.h>
 #include "getopt.h"
 
@@ -33,9 +33,9 @@ int totalPackets = 0;   //celkovy pocet odchycenych paketu
 int parseArgs(int argc, char *argv[]);
 void printHeader(const u_char *buffer, unsigned short sourcePort, unsigned short destPort);
 void printPacket(const u_char *buffer, int len);
+void printHelp();
 void tcpPacket(const u_char *buffer, int len);
 void udpPacket(const u_char *buffer, int len);
-
 
 int main(int argc, char *argv[]) {
     pcap_t *handle;
@@ -45,10 +45,15 @@ int main(int argc, char *argv[]) {
     int res;
     char errorBuffer[100];
 
-    parseArgs(argc, argv);
+    int errCode = parseArgs(argc, argv);
+    if (errCode == 1) {
+        // error
+        return errCode;
+    }
 
     // pokud nebylo zadane rozhrani, vypise vsechny rozhrani a ukonci program
     if (params.interface == 0) {
+        printHelp();
         pcap_if_t *devList, *device;
         pcap_findalldevs(&devList, errorBuffer);
         printf("Seznam aktivnich rozhrani:\n");
@@ -177,8 +182,10 @@ void printHeader(const u_char *buffer, unsigned short sourcePort, unsigned short
 void printPacket(const u_char *buffer, int len) {
     // ocislovani radku
     int hexnum = 0;
+    int i = 0;
+    int spaces = 3*16 + 2; // pocet mezer v jednom radku (pro spravne formatovani posledniho radku vypisu paketu)
     // vypis celeho paketu
-    for (int i = 0; i < len; ++i) {
+    for (i = 0; i < len; ++i) {
         // hexadecimalni format - po 16 bitech
         if (i != 0 && i % 16 == 0) {
             printf("%#06x: ", hexnum);
@@ -203,6 +210,34 @@ void printPacket(const u_char *buffer, int len) {
             hexnum += 16;
             printf("\n");
         }
+        // vypis zbytku paketu, pokud nejaky je
+        if (i == len - 1) {
+            printf("%#06x: ", hexnum);
+            //vypis hexa
+            for (int j = i - i % 16; j < i; ++j) {
+                if (j % 8 == 0) {
+                    printf(" ");
+                    --spaces;
+                }
+                spaces -= 3;
+                printf("%02x ", (unsigned int) buffer[j]);
+            }
+            // vypis mezer pro spravne formatovani
+            for (int j = 0; j < spaces; ++j) {
+                printf(" ");
+            }
+            // vypis ascii
+            for (int j = i - i % 16; j < i; ++j) {
+                if (j % 8 == 0) {
+                    printf(" ");
+                }
+                if (buffer[j] > 32 && buffer[j] < 128) {
+                    printf("%c", (unsigned char) buffer[j]);
+                } else {
+                    printf(".");
+                }
+            }
+        }
     }
     printf("\n");
 }
@@ -215,12 +250,11 @@ void printPacket(const u_char *buffer, int len) {
  */
 void tcpPacket(const u_char *buffer, int len) {
     struct iphdr *ipHeader = (struct iphdr *) (buffer + sizeof(struct ethhdr));
-
     struct tcphdr *tcpHeader = (struct tcphdr *) (buffer + sizeof(struct ethhdr) + ipHeader->ihl * 4);
 
     if (params.port == 0 || ntohs(tcpHeader->source) == params.port || ntohs(tcpHeader->dest) == params.port) {
-        printHeader(buffer, ntohs(tcpHeader->source), ntohs(tcpHeader->dest));
 
+        printHeader(buffer, ntohs(tcpHeader->source), ntohs(tcpHeader->dest));
         printPacket(buffer, len);
 
         ++totalPackets;
@@ -235,12 +269,11 @@ void tcpPacket(const u_char *buffer, int len) {
  */
 void udpPacket(const u_char *buffer, int len) {
     struct iphdr *ipHeader = (struct iphdr *) (buffer + sizeof(struct ethhdr));
-
     struct udphdr *udpHeader = (struct udphdr *) (buffer + sizeof(struct ethhdr) + ipHeader->ihl * 4);
 
     if (params.port == 0 || ntohs(udpHeader->source) == params.port || ntohs(udpHeader->dest) == params.port) {
-        printHeader(buffer, ntohs(udpHeader->source), ntohs(udpHeader->dest));
 
+        printHeader(buffer, ntohs(udpHeader->source), ntohs(udpHeader->dest));
         printPacket(buffer, len);
 
         ++totalPackets;
@@ -266,14 +299,15 @@ int parseArgs(int argc, char *argv[]) {
     int optionIndex = 0;
     struct option options[] = {
             {"tcp", no_argument, 0, 0},
-            {"udp", no_argument, 0, 0}
+            {"udp", no_argument, 0, 0},
+            {"help", no_argument, 0, 0}
     };
-    while ((c = getopt_long(argc, argv, "i:p:tun:", options, &optionIndex)) != -1) {
+    while ((c = getopt_long(argc, argv, "i:p:tun:h", options, &optionIndex)) != -1) {
         switch (c) {
             case 0:
                 if ((strcmp(options[optionIndex].name, "tcp")) == 0) {
                     params.tcp = 1;
-                } else {
+                } else if (strcmp(options[optionIndex].name, "udp")) {
                     params.udp = 1;
                 }
                 break;
@@ -295,10 +329,18 @@ int parseArgs(int argc, char *argv[]) {
                 break;
             case '?':
                 break;
+            case 'h':
+                break;
             default:
                 fprintf(stderr, "CHYBA: Neznamy argument. %o\n", c);
+                printHelp();
                 return 1;
         }
     }
     return 0;
+}
+
+void printHelp() {
+    printf("Napoveda pro ipk-sniffer:\n"
+            "   Pouziti: \n     ./ipk-sniffer -i rozhrani [-p port] [--tcp|-t] [--udp|-u] [-n num]\n");
 }
