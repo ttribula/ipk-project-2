@@ -1,4 +1,4 @@
-Aplikace ipk-sniffer slouží jako sniffer paketů, pro odchycení a filtrování paketů na daném rozhraní. Sniffer filtruje a vypisuje pakety protokolu TCP, UDP, ICMP a IGMP z rodiny TCP/IP na standardní výstup.
+Aplikace ipk-sniffer slouží jako sniffer paketů, pro odchycení a filtrování paketů na daném rozhraní. Sniffer filtruje a vypisuje pakety protokolu TCP, UDP, ICMP a IGMP z rodiny TCP/IP na standardní výstup. Pro správnou funkcionalitu aplikace jsou třeba přístupová práva pro připojení na rozhraní
 
 
 Kompilace:
