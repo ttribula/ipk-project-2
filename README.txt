@@ -1,5 +1,6 @@
 Aplikace ipk-sniffer slouží jako sniffer paketů, pro odchycení a filtrování paketů na daném rozhraní. Sniffer filtruje a vypisuje pakety protokolu TCP, UDP, ICMP a IGMP z rodiny TCP/IP na standardní výstup.
 
+
 Kompilace:
 	make
 
@@ -15,4 +16,5 @@ Spuštění:
 		--igmp	    - filtrace IGMP paketů		
 		--igmp-only - filtrace pouze IGMP paketů
 		--help      - vypis napovedy
+	- při spuštění snifferu bez argumentů se vypíše seznam dostupných rozhraní
 
