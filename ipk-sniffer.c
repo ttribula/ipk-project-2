@@ -379,7 +379,7 @@ int parseArgs(int argc, char *argv[]) {
                 } else if (strcmp(options[optionIndex].name, "icmp") == 0) {
                     params.icmp = 1;
                 } else if (strcmp(options[optionIndex].name, "icmp-only") == 0) {
-                    params.igmp = 2;
+                    params.icmp = 2;
                 } else if (strcmp(options[optionIndex].name, "igmp") == 0) {
                     params.igmp = 1;
                 } else if (strcmp(options[optionIndex].name, "igmp-only") == 0) {
