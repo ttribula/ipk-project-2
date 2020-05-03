@@ -23,6 +23,8 @@ typedef struct parameters {
     int tcp;
     int udp;
     int num;
+    int icmp;   // 0-nepouzit, 1-pouzit --icmp, 2 pouzit --icmp-only
+    int igmp;   // 0-nepouzit, 1-pouzit --igmp, 2 pouzit --igmp-only
 } Params;
 
 // globalni promenne
@@ -31,11 +33,13 @@ int totalPackets = 0;   //celkovy pocet odchycenych paketu
 
 // prototypy funkci
 int parseArgs(int argc, char *argv[]);
-void printHeader(const u_char *buffer, unsigned short sourcePort, unsigned short destPort);
+void printHeader(const u_char *buffer, unsigned short sourcePort, unsigned short destPort, int protocol);
 void printPacket(const u_char *buffer, int len);
 void printHelp();
 void tcpPacket(const u_char *buffer, int len);
 void udpPacket(const u_char *buffer, int len);
+void icmpPacket(const u_char *buffer, int len);
+void igmpPacket(const u_char *buffer, int len);
 
 int main(int argc, char *argv[]) {
     pcap_t *handle;
@@ -44,13 +48,11 @@ int main(int argc, char *argv[]) {
     const u_char *packet;
     int res;
     char errorBuffer[100];
-
     int errCode = parseArgs(argc, argv);
     if (errCode == 1) {
         // error
         return errCode;
     }
-
     // pokud nebylo zadane rozhrani, vypise vsechny rozhrani a ukonci program
     if (params.interface == 0) {
         printHelp();
@@ -61,6 +63,7 @@ int main(int argc, char *argv[]) {
             printf("%s - %s\n", device->name, device->description);
         }
         pcap_freealldevs(devList);
+        free(params.interfaceId);
         return 0;
     }
 
@@ -68,7 +71,8 @@ int main(int argc, char *argv[]) {
     handle = pcap_open_live(params.interfaceId, 65536, 1, 1000, errorBuffer);
     if (!handle) {
         // nastala chyba pri otevirani rozhrani
-        printf("%s\n", errorBuffer);
+        printf("CHYBA: %s\n", errorBuffer);
+        free(params.interfaceId);
         return 1;
     }
 
@@ -80,19 +84,30 @@ int main(int argc, char *argv[]) {
         }
         // ulozeni ip hlavicky z paketu do struktury
         ipHeader = (struct iphdr *) (packet + sizeof(struct ethhdr));
-        if (ipHeader->protocol == 6) {          // TCP
+        if (ipHeader->protocol == 17) {  // UDP
+            // kontrola zda byl pouzit parametr -u nebo --udp nebo zadny z nich
+            if (((params.tcp == 0 && params.udp == 0) || params.udp == 1)  && (params.icmp != 2 && params.igmp != 2) ) {
+                udpPacket(packet, header->len);
+            }
+        } else if (ipHeader->protocol == 6) {          // TCP
             // kontrola zda byl pouzit parametr -t nebo --tcp nebo zadny z nich
-            if ((params.tcp == 0 && params.udp == 0) || params.tcp == 1) {
+            if (((params.tcp == 0 && params.udp == 0) || params.tcp == 1) && (params.icmp != 2 && params.igmp != 2)) {
                 tcpPacket(packet, header->len);
             }
-        } else if (ipHeader->protocol == 17) {  // UDP
-            // kontrola zda byl pouzit parametr -u nebo --udp nebo zadny z nich
-            if ((params.tcp == 0 && params.udp == 0) || params.udp == 1) {
-                udpPacket(packet, header->len);
+        } else if (ipHeader->protocol == 1) {          // ICMP
+            // kontrola zda byl pouzit parametr --icmp nebo --icmp-only
+            if (params.icmp > 0 && params.igmp != 2) {
+                icmpPacket(packet, header->len);
+            }
+        } else if (ipHeader->protocol == 2) {          // IGMP
+            // kontrola zda byl pouzit parametr --igmp nebo --igmp-only
+            if (params.igmp > 0 && params.icmp != 2) {
+                igmpPacket(packet, header->len);
             }
         }
     }
-    // uvolneni pameti nazvu zadaneho rozhrani
+    pcap_close(handle);
+    // uvolneni pameti
     free(params.interfaceId);
     return 0;
 }
@@ -104,7 +119,7 @@ int main(int argc, char *argv[]) {
  * @param sourcePort Zdrojovy port, pro nastaveni filtru na port
  * @param destPort Cilovy port, pro nastaveni filtru na port
  */
-void printHeader(const u_char *buffer, unsigned short sourcePort, unsigned short destPort) {
+void printHeader(const u_char *buffer, unsigned short sourcePort, unsigned short destPort, int protocol) {
     struct addrinfo *res, *result;
     char srcHostname[1025] = "";
     char destHostname[1025] = "";
@@ -159,18 +174,27 @@ void printHeader(const u_char *buffer, unsigned short sourcePort, unsigned short
     freeaddrinfo(result);
 
     // ziskani aktualniho casu
-    char buf[80];
+    char timeBuf[80];
     struct timeval time;
     gettimeofday(&time, NULL);
     time_t raw = time.tv_sec;
     struct tm ts;
     ts = *localtime(&raw);
-    strftime(buf, sizeof(buf), "%H:%M:%S", &ts);
+    strftime(timeBuf, sizeof(timeBuf), "%H:%M:%S", &ts);
     int usec = (int) time.tv_usec;
 
-    // vypis zakladnich informaci: cas ip/domenove_jmeno port > ip/domenove_jmeno port
-    printf("%s.%d %s : %d > %s : %d\n\n", buf, usec, srcHostname, sourcePort,
-           destHostname, destPort);
+    if (protocol == 0 || protocol == 1) {
+        // vypis zakladnich informaci: cas ip/domenove_jmeno port > ip/domenove_jmeno port
+        printf("%s.%d %s : %d > %s : %d\n\n", timeBuf, usec, srcHostname, sourcePort,
+               destHostname, destPort);
+    } else if (protocol == 2) {
+        // vypis zakladnich informaci: cas ip/domenove_jmeno > ip/domenove_jmeno
+        printf("%s.%d %s > %s  ICMP\n\n", timeBuf, usec, srcHostname, destHostname);
+    } else if (protocol == 3) {
+        // vypis zakladnich informaci: cas ip/domenove_jmeno > ip/domenove_jmeno
+        printf("%s.%d %s > %s  IGMP\n\n", timeBuf, usec, srcHostname, destHostname);
+    }
+
 }
 
 /**
@@ -182,13 +206,17 @@ void printHeader(const u_char *buffer, unsigned short sourcePort, unsigned short
 void printPacket(const u_char *buffer, int len) {
     // ocislovani radku
     int hexnum = 0;
-    int i = 0;
+    int i;
     int spaces = 3*16 + 2; // pocet mezer v jednom radku (pro spravne formatovani posledniho radku vypisu paketu)
     // vypis celeho paketu
     for (i = 0; i < len; ++i) {
         // hexadecimalni format - po 16 bitech
         if (i != 0 && i % 16 == 0) {
-            printf("%#06x: ", hexnum);
+            if (hexnum == 0) {
+                printf("0x0000: ");
+            } else {
+                printf("%#06x: ", hexnum);
+            }
             //vypis hexa
             for (int j = i - 16; j < i; ++j) {
                 if (j % 8 == 0) {
@@ -239,7 +267,7 @@ void printPacket(const u_char *buffer, int len) {
             }
         }
     }
-    printf("\n");
+    printf("\n\n");
 }
 
 /**
@@ -254,7 +282,7 @@ void tcpPacket(const u_char *buffer, int len) {
 
     if (params.port == 0 || ntohs(tcpHeader->source) == params.port || ntohs(tcpHeader->dest) == params.port) {
 
-        printHeader(buffer, ntohs(tcpHeader->source), ntohs(tcpHeader->dest));
+        printHeader(buffer, ntohs(tcpHeader->source), ntohs(tcpHeader->dest), 0);
         printPacket(buffer, len);
 
         ++totalPackets;
@@ -273,7 +301,40 @@ void udpPacket(const u_char *buffer, int len) {
 
     if (params.port == 0 || ntohs(udpHeader->source) == params.port || ntohs(udpHeader->dest) == params.port) {
 
-        printHeader(buffer, ntohs(udpHeader->source), ntohs(udpHeader->dest));
+        printHeader(buffer, ntohs(udpHeader->source), ntohs(udpHeader->dest), 1);
+        printPacket(buffer, len);
+
+        ++totalPackets;
+    }
+}
+
+/**
+ * Funkce ulozi data o icmp paketu do struktury, pro ziskani potrebnych dat a vola vypis celeho paketu
+ *
+ * @param buffer Data paketu
+ * @param len Delka paketu
+ */
+void icmpPacket(const u_char *buffer, int len) {
+
+    if (params.port == 0) {
+
+        printHeader(buffer, 0, 0, 2);
+        printPacket(buffer, len);
+
+        ++totalPackets;
+    }
+}
+
+/**
+ * Funkce ulozi data o igmp paketu do struktury, pro ziskani potrebnych dat a vola vypis celeho paketu
+ *
+ * @param buffer Data paketu
+ * @param len Delka paketu
+ */
+void igmpPacket(const u_char *buffer, int len) {
+    if (params.port == 0) {
+
+        printHeader(buffer, 0, 0, 3);
         printPacket(buffer, len);
 
         ++totalPackets;
@@ -294,21 +355,35 @@ int parseArgs(int argc, char *argv[]) {
     params.tcp = 0;
     params.udp = 0;
     params.num = 1;
+    params.icmp = 0;
+    params.igmp = 0;
 
     int c = 0;
     int optionIndex = 0;
     struct option options[] = {
             {"tcp", no_argument, 0, 0},
             {"udp", no_argument, 0, 0},
-            {"help", no_argument, 0, 0}
+            {"help", no_argument, 0, 0},
+            {"icmp", no_argument, 0, 0},
+            {"icmp-only", no_argument, 0, 0},
+            {"igmp", no_argument, 0, 0},
+            {"igmp-only", no_argument, 0, 0}
     };
     while ((c = getopt_long(argc, argv, "i:p:tun:h", options, &optionIndex)) != -1) {
         switch (c) {
             case 0:
                 if ((strcmp(options[optionIndex].name, "tcp")) == 0) {
                     params.tcp = 1;
-                } else if (strcmp(options[optionIndex].name, "udp")) {
+                } else if (strcmp(options[optionIndex].name, "udp") == 0) {
                     params.udp = 1;
+                } else if (strcmp(options[optionIndex].name, "icmp") == 0) {
+                    params.icmp = 1;
+                } else if (strcmp(options[optionIndex].name, "icmp-only") == 0) {
+                    params.igmp = 2;
+                } else if (strcmp(options[optionIndex].name, "igmp") == 0) {
+                    params.igmp = 1;
+                } else if (strcmp(options[optionIndex].name, "igmp-only") == 0) {
+                    params.igmp = 2;
                 }
                 break;
             case 'i':
